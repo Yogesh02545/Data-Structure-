@@ -336,7 +336,7 @@ if __name__ == "__main__":
     main()
 
 
-# Potential improvements you can try:
+
 def predict_price(self, input_features):
     """Predict price for new input features"""
     if self.best_model is None:
