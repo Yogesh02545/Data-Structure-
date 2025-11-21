@@ -1,0 +1,363 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.svm import SVR
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+from pathlib import Path
+
+
+class EnhancedMLTrainer:
+    def __init__(self):
+        self.models = {}
+        self.best_model = None
+        self.scaler = StandardScaler()
+        self.feature_names = []
+        self.apply_log_transform = False
+
+    def load_and_explore_data(self, file_path):
+        """Load and explore the dataset"""
+        try:
+            # Use raw string for Windows path
+            df = pd.read_csv(file_path)
+            print(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+
+            # Basic exploration
+            print("\n=== Dataset Info ===")
+            print(df.info())
+
+            print("\n=== Missing Values ===")
+            print(df.isnull().sum())
+
+            print("\n=== Statistical Summary ===")
+            print(df.describe())
+
+            # Check target variable distribution
+            if "price" in df.columns:
+                plt.figure(figsize=(12, 4))
+
+                plt.subplot(1, 2, 1)
+                df["price"].hist(bins=30)
+                plt.title("Price Distribution")
+                plt.xlabel("Price")
+                plt.ylabel("Frequency")
+
+                plt.subplot(1, 2, 2)
+                # Log transform if heavily skewed
+                if df["price"].skew() > 1:
+                    np.log1p(df["price"]).hist(bins=30)
+                    plt.title("Log(Price) Distribution")
+                    plt.xlabel("Log(Price)")
+                else:
+                    df["price"].hist(bins=30)
+                    plt.title("Price Distribution")
+                    plt.xlabel("Price")
+
+                plt.tight_layout()
+                plt.show()
+
+            return df
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            return None
+
+    def enhanced_preprocessing(self, df, target_column):
+        """Enhanced preprocessing with feature engineering"""
+        df_processed = df.copy()
+
+        # Handle missing values
+        for column in df_processed.columns:
+            if df_processed[column].isnull().sum() > 0:
+                if df_processed[column].dtype in ["object", "category"]:
+                    df_processed[column].fillna(
+                        df_processed[column].mode()[0], inplace=True
+                    )
+                else:
+                    df_processed[column].fillna(
+                        df_processed[column].median(), inplace=True
+                    )
+
+        # Encode categorical variables
+        categorical_columns = df_processed.select_dtypes(include=["object"]).columns
+        for col in categorical_columns:
+            if col != target_column:
+                le = LabelEncoder()
+                df_processed[col] = le.fit_transform(df_processed[col].astype(str))
+
+        # Feature engineering (add interaction terms, polynomial features)
+        numerical_columns = df_processed.select_dtypes(include=[np.number]).columns
+        numerical_columns = [col for col in numerical_columns if col != target_column]
+
+        # Add some interaction terms
+        if "area" in numerical_columns and "bedrooms" in numerical_columns:
+            df_processed["area_bedroom_interaction"] = (
+                df_processed["area"] * df_processed["bedrooms"]
+            )
+
+        if "area" in numerical_columns and "bathrooms" in numerical_columns:
+            df_processed["area_bathroom_interaction"] = (
+                df_processed["area"] * df_processed["bathrooms"]
+            )
+
+        return df_processed
+
+    def prepare_data(self, df, target_column, test_size=0.2, random_state=42):
+        """Prepare data with optional target transformation"""
+        X = df.drop(columns=[target_column])
+        y = df[target_column]
+
+        # Check if target needs transformation
+        self.apply_log_transform = y.skew() > 1
+        if self.apply_log_transform:
+            y = np.log1p(y)
+            print("Applied log transformation to target variable")
+
+        self.feature_names = X.columns.tolist()
+
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state
+        )
+
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        return X_train_scaled, X_test_scaled, y_train, y_test
+
+    def train_multiple_models(self, X_train, y_train):
+        """Train multiple models and compare performance"""
+        models = {
+            "random_forest": RandomForestRegressor(random_state=42),
+            "gradient_boosting": GradientBoostingRegressor(random_state=42),
+            "linear_regression": LinearRegression(),
+            "ridge": Ridge(random_state=42),
+            "lasso": Lasso(random_state=42),
+            "svr": SVR(),
+        }
+
+        # Hyperparameter grids
+        param_grids = {
+            "random_forest": {
+                "n_estimators": [100, 200],
+                "max_depth": [10, 20, None],
+                "min_samples_split": [2, 5],
+            },
+            "gradient_boosting": {
+                "n_estimators": [100, 200],
+                "learning_rate": [0.05, 0.1],
+                "max_depth": [3, 5],
+            },
+            "ridge": {"alpha": [0.1, 1.0, 10.0]},
+            "lasso": {"alpha": [0.1, 1.0, 10.0]},
+        }
+
+        best_score = -np.inf
+        self.best_model = None
+
+        for name, model in models.items():
+            print(f"\nTraining {name}...")
+
+            if name in param_grids:
+                # Use GridSearchCV for hyperparameter tuning
+                grid_search = GridSearchCV(
+                    model, param_grids[name], cv=5, scoring="r2", n_jobs=-1
+                )
+                grid_search.fit(X_train, y_train)
+                self.models[name] = grid_search.best_estimator_
+                cv_score = grid_search.best_score_
+                print(f"Best parameters: {grid_search.best_params_}")
+            else:
+                # Use cross-validation for simple models
+                model.fit(X_train, y_train)
+                self.models[name] = model
+                cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring="r2")
+                cv_score = np.mean(cv_scores)
+
+            print(f"Cross-validation R²: {cv_score:.4f}")
+
+            if cv_score > best_score:
+                best_score = cv_score
+                self.best_model = self.models[name]
+
+        print(
+            f"\nBest model: {type(self.best_model).__name__} with CV R²: {best_score:.4f}"
+        )
+
+    def evaluate_models(self, X_test, y_test):
+        """Evaluate all trained models"""
+        results = {}
+
+        for name, model in self.models.items():
+            y_pred = model.predict(X_test)
+
+            # Reverse log transformation if applied
+            if self.apply_log_transform:
+                y_pred_original = np.expm1(y_pred)
+                y_test_original = np.expm1(y_test)
+            else:
+                y_pred_original = y_pred
+                y_test_original = y_test
+
+            # Calculate metrics
+            mae = mean_absolute_error(y_test_original, y_pred_original)
+            rmse = np.sqrt(mean_squared_error(y_test_original, y_pred_original))
+            r2 = r2_score(y_test_original, y_pred_original)
+
+            results[name] = {"MAE": mae, "RMSE": rmse, "R²": r2}
+
+            print(f"\n=== {name.upper()} ===")
+            print(f"MAE: {mae:,.2f}")
+            print(f"RMSE: {rmse:,.2f}")
+            print(f"R²: {r2:.4f}")
+
+        return results
+
+    def plot_comparison(self, results):
+        """Compare model performance"""
+        metrics_df = pd.DataFrame(results).T
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+        metrics_df["MAE"].plot(
+            kind="bar", ax=axes[0], title="MAE Comparison", color="skyblue"
+        )
+        axes[0].set_ylabel("MAE")
+
+        metrics_df["RMSE"].plot(
+            kind="bar", ax=axes[1], title="RMSE Comparison", color="lightcoral"
+        )
+        axes[1].set_ylabel("RMSE")
+
+        metrics_df["R²"].plot(
+            kind="bar", ax=axes[2], title="R² Comparison", color="lightgreen"
+        )
+        axes[2].set_ylabel("R² Score")
+
+        plt.tight_layout()
+        plt.show()
+
+        return metrics_df
+
+    def plot_feature_importance(self, top_n=10):
+        """Plot feature importance for tree-based models"""
+        if hasattr(self.best_model, "feature_importances_"):
+            importance = self.best_model.feature_importances_
+            feature_importance_df = (
+                pd.DataFrame({"feature": self.feature_names, "importance": importance})
+                .sort_values("importance", ascending=False)
+                .head(top_n)
+            )
+
+            plt.figure(figsize=(10, 6))
+            sns.barplot(data=feature_importance_df, x="importance", y="feature")
+            plt.title(
+                f"Top {top_n} Feature Importance - {type(self.best_model).__name__}"
+            )
+            plt.tight_layout()
+            plt.show()
+
+            print("\n=== Feature Importance ===")
+            print(feature_importance_df)
+
+            return feature_importance_df
+
+    def save_best_model(self, file_path):
+        """Save the best model and preprocessing objects"""
+        if self.best_model is not None:
+            model_data = {
+                "model": self.best_model,
+                "scaler": self.scaler,
+                "feature_names": self.feature_names,
+                "apply_log_transform": self.apply_log_transform,
+            }
+            joblib.dump(model_data, file_path)
+            print(f"Best model saved to {file_path}")
+        else:
+            print("No model to save!")
+
+
+# Main execution
+def main():
+    trainer = EnhancedMLTrainer()
+
+    # Load your dataset - CORRECTED FILE PATH
+    file_path = r"C:\Users\Lenovo\OneDrive\Desktop\sklearndemo\Housing.csv"
+    df = trainer.load_and_explore_data(file_path)
+
+    if df is not None:
+        target_column = "price"  # Change to your target column if different
+
+        # Enhanced preprocessing
+        df_processed = trainer.enhanced_preprocessing(df, target_column)
+
+        # Prepare data
+        X_train, X_test, y_train, y_test = trainer.prepare_data(
+            df_processed, target_column
+        )
+
+        # Train multiple models
+        trainer.train_multiple_models(X_train, y_train)
+
+        # Evaluate all models
+        results = trainer.evaluate_models(X_test, y_test)
+
+        # Plot comparison
+        metrics_df = trainer.plot_comparison(results)
+
+        # Plot feature importance
+        feature_importance = trainer.plot_feature_importance()
+
+        # Save the best model
+        model_path = (
+            r"C:\Users\Lenovo\OneDrive\Desktop\sklearndemo\enhanced_trained_model.pkl"
+        )
+        trainer.save_best_model(model_path)
+
+        # Print best model summary
+        if trainer.best_model is not None:
+            best_model_name = [
+                name
+                for name, model in trainer.models.items()
+                if model == trainer.best_model
+            ][0]
+            print(f"\n🎯 BEST MODEL: {best_model_name.upper()}")
+            print(f"📊 Final R² Score: {results[best_model_name]['R²']:.4f}")
+            print(f"📉 MAE: {results[best_model_name]['MAE']:,.2f}")
+            print(f"📈 RMSE: {results[best_model_name]['RMSE']:,.2f}")
+
+
+if __name__ == "__main__":
+    main()
+
+
+# Potential improvements you can try:
+def predict_price(self, input_features):
+    """Predict price for new input features"""
+    if self.best_model is None:
+        print("No model trained yet!")
+        return None
+    
+    # Convert input to array and scale
+    input_array = np.array([input_features])
+    input_scaled = self.scaler.transform(input_array)
+    
+    # Predict
+    prediction_log = self.best_model.predict(input_scaled)
+    
+    # Convert back from log if needed
+    if self.apply_log_transform:
+        predicted_price = np.expm1(prediction_log)[0]
+    else:
+        predicted_price = prediction_log[0]
+    
+    return predicted_price
+
+# Usage example:
+# trainer = EnhancedMLTrainer()
+# price = trainer.predict_price([area, bedrooms, bathrooms, ...])
