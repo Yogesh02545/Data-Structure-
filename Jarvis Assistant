@@ -1,0 +1,278 @@
+import speech_recognition as sr
+import webbrowser
+import pyttsx3
+import requests
+import time
+import os
+
+
+# Try to import musicLibrary, create a simple one if not available
+try:
+    import musicLibrary
+except ImportError:
+    # Create a simple music library
+    class SimpleMusicLibrary:
+        music = {
+            "believer": "https://www.youtube.com/watch?v=7wtfhZwyrcc",
+            "shape": "https://www.youtube.com/watch?v=JGwWNGJdvx8", 
+            "despacito": "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
+            "thunder": "https://www.youtube.com/watch?v=fKopy74weus",
+            "hello": "https://www.youtube.com/watch?v=YQHsXMglC9A"
+        }
+    musicLibrary = SimpleMusicLibrary()
+
+class WorkingJARVIS:
+    def __init__(self):
+        self.recognizer = sr.Recognizer()
+        self.newsapi = "dc75628cc9d74521b76c46c88f3700be"
+        
+        # Initialize text-to-speech engine
+        self.engine = pyttsx3.init()
+        self.engine.setProperty('rate', 180)  # Speaking speed
+        self.engine.setProperty('volume', 0.9)  # Volume level
+        
+        # Get available voices and set a better one if available
+        voices = self.engine.getProperty('voices')
+        if len(voices) > 1:
+            self.engine.setProperty('voice', voices[1].id)  # Usually female voice
+        else:
+            self.engine.setProperty('voice', voices[0].id)  # Default voice
+        
+    def speak(self, text):
+        """Speech function using pyttsx3 only"""   
+        print(f"JARVIS: {text}")
+        self.engine.say(text)
+        self.engine.runAndWait()
+    
+    def aiProcess(self, command): 
+        """Simple AI responses without ollama"""
+        ai_responses = {
+            "hello": "Hello sir! How can I assist you today?",
+            "how are you": "I'm functioning optimally, thank you for asking.",
+            "what can you do": "I can open websites, play music, tell time, read news, and have basic conversations.",
+            "who are you": "I am JARVIS, your personal assistant.",
+            "thank you": "You're welcome, sir.",
+            "tell me a joke": "Why don't scientists trust atoms? Because they make up everything!",
+            "what is your purpose": "My purpose is to assist you with tasks and make your life easier."
+            
+        }
+        
+        command_lower = command.lower()
+        
+        # Check for matching responses
+        for key, response in ai_responses.items():
+            if key in command_lower:
+                return response
+        
+        # Default response for unknown queries
+        return f"I heard you say: '{command}'. This is a basic version of JARVIS. For full AI capabilities, please install ollama."
+    
+    def get_news(self):
+        """News function with error handling"""
+        try:
+            # Using a simpler news API approach
+            url = f"https://newsapi.org/v2/top-headlines?country=us&pageSize=2&apiKey={self.newsapi}"
+            r = requests.get(url)
+            
+            if r.status_code == 200:
+                data = r.json()
+                articles = data.get('articles', [])
+                
+                if not articles:
+                    return "No news articles found at the moment."
+                
+                news_response = "Here are the latest news headlines. "
+                for i, article in enumerate(articles[:2]):  # Only first 2 articles
+                    title = article.get('title', '').strip()
+                    if title and title != '[Removed]':
+                        # Clean up the title
+                        clean_title = title.split(' - ')[0]  # Remove source
+                        news_response += f"Headline {i+1}: {clean_title}. "
+                
+                return news_response
+            else:
+                return "Unable to fetch news at the moment. Please check your API key."
+                
+        except Exception as e:
+            return f"News service is temporarily unavailable."
+    
+    def play_music(self, command):
+        """Music player function"""
+        try:
+            # Extract song name more reliably
+            words = command.lower().split()
+            if "play" in words:
+                song_index = words.index("play") + 1
+                
+                if song_index < len(words):
+                    song_name = words[song_index]  # Fixed variable name (was song_name)
+                    
+                    # Check if song exists in library
+                    if hasattr(musicLibrary, 'music') and song_name in musicLibrary.music:
+                        link = musicLibrary.music[song_name]
+                        webbrowser.open(link)
+                        return f"Playing {song_name} on YouTube"
+                    else:
+                        available_songs = list(musicLibrary.music.keys()) if hasattr(musicLibrary, 'music') else []
+                        return f"Song '{song_name}' not found. Try: {', '.join(available_songs)}"
+                else:
+                    return "Please specify a song name after 'play'"
+            else:
+                return "Say 'play' followed by a song name"
+                
+        except Exception as e:
+            return f"Couldn't play music: {str(e)}"
+    
+    def process_command(self, command):
+        """Main command processor"""
+        print(f"Processing command: {command}")
+        
+        command_lower = command.lower()
+        
+        if "open google" in command_lower:
+            webbrowser.open("https://google.com")
+            return "Opening Google"
+            
+        elif "open facebook" in command_lower:
+            webbrowser.open("https://facebook.com")
+            return "Opening Facebook"
+            
+        elif "open youtube" in command_lower:
+            webbrowser.open("https://youtube.com")
+            return "Opening YouTube"
+            
+        elif "open linkedin" in command_lower:
+            webbrowser.open("https://linkedin.com")
+            return "Opening LinkedIn"
+            
+        elif "open github" in command_lower:
+            webbrowser.open("https://github.com")
+            return "Opening GitHub"
+            
+        elif "play" in command_lower:
+            return self.play_music(command)
+            
+        elif "news" in command_lower:
+            return self.get_news()
+            
+        elif "time" in command_lower:
+            current_time = time.strftime("%I:%M %p")
+            return f"The current time is {current_time}"
+            
+        elif "date" in command_lower:
+            current_date = time.strftime("%A, %B %d, %Y")
+            return f"Today is {current_date}"
+            
+        elif "stop" in command_lower or "exit" in command_lower or "shutdown" in command_lower:
+            self.speak("Shutting down JARVIS. Goodbye!")
+            exit()
+            
+        elif "search" in command_lower:
+            query = command_lower.replace("search", "").strip()
+            if query:
+                webbrowser.open(f"https://www.google.com/search?q={query}")
+                return f"Searching for {query}"
+            else:
+                return "What would you like me to search for?"
+            
+        else:
+            # Let basic AI handle everything else
+            return self.aiProcess(command)
+    
+    def listen_for_command(self):
+        """Listen for a single command"""
+        try:
+            with sr.Microphone() as source:
+                print("JARVIS Active... Listening for command...")
+                audio = self.recognizer.listen(source, timeout=10, phrase_time_limit=10)
+                command = self.recognizer.recognize_google(audio)
+                print(f"You said: {command}")
+                return command
+        except sr.WaitTimeoutError:
+            return "timeout"
+        except sr.UnknownValueError:
+            return "unknown"
+        except Exception as e:
+            print(f"Listening error: {e}")
+            return "error"
+    
+    def run(self):
+        """Main JARVIS loop"""
+        self.speak("JARVIS initialized and ready. Say 'Jarvis' to activate.")
+        
+        while True:
+            try:
+                print("\n🔍 Listening for wake word 'Jarvis'...")
+                with sr.Microphone() as source:
+                    # Listen for wake word with shorter timeouts
+                    audio = self.recognizer.listen(source, timeout=1, phrase_time_limit=2)
+                    word = self.recognizer.recognize_google(audio)
+                    
+                    if "jarvis" in word.lower():
+                        self.speak("Hello sir, how may I help you?")  # Added your requested greeting
+                        
+                        # Get and process command
+                        command = self.listen_for_command()
+                        
+                        if command not in ["timeout", "unknown", "error"]:
+                            response = self.process_command(command)
+                            if response:
+                                self.speak(response)
+                        else:
+                            if command == "timeout":
+                                self.speak("I didn't hear a command.")
+                            elif command == "unknown":
+                                self.speak("I couldn't understand that.")
+                            
+            except sr.WaitTimeoutError:
+                # No wake word detected, continue listening
+                continue
+            except sr.UnknownValueError:
+                # Couldn't understand audio, continue listening
+                continue
+            except Exception as e:
+                print(f"Main loop error: {e}")
+                continue
+
+# Test function to verify everything works
+def test_jarvis():
+    """Test JARVIS without voice input"""
+    jarvis = WorkingJARVIS()
+    jarvis.speak("JARVIS test mode activated!")
+    
+    # Test commands
+    test_commands = [
+        "hello",
+        "what time is it",
+        "play believer",
+        "open google",
+        "what can you do"
+    ]
+    
+    for cmd in test_commands:
+        print(f"\nTesting: {cmd}")
+        response = jarvis.process_command(cmd)
+        print(f"Response: {response}")
+
+if __name__ == "__main__":
+    print("Starting JARVIS...")
+    print("Available commands:")
+    print("- Open Google/Facebook/YouTube/LinkedIn/GitHub")
+    print("- Play [song name]")
+    print("- News")
+    print("- Time/Date")
+    print("- Search [query]")
+    print("- Exit/Stop")
+    print("- Chat with basic AI")
+    
+    # Run the full JARVIS system
+    try:
+        jarvis = WorkingJARVIS()
+        jarvis.run()
+    except KeyboardInterrupt:
+        print("\nJARVIS shutdown by user")
+    except Exception as e:
+        print(f"Error: {e}")
+        print("Running in test mode...")
+        test_jarvis()
+
